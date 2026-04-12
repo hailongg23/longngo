@@ -1,0 +1,154 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /var/lib/promtail/positions.yaml
+
+clients:
+  - url: http://192.168.1.21:3100/loki/api/v1/push
+    # tenant_id: default   # nếu bạn bật multi-tenant, set X-Scope-OrgID
+    # basic_auth:          # nếu Loki có auth
+    #   username: xxx
+    #   password: yyy
+    external_labels:
+      exporter: promtail
+
+scrape_configs:
+  # =========================
+  # 1) APP logs (Java/Spring…)
+  # =========================
+  - job_name: app-logs
+    static_configs:
+      - targets: [ localhost ]
+        labels:
+          job: app
+          component: app
+          service_name: your-war-service
+          instance: ${HOSTNAME}
+          __path__: /opt/app/logs/*.log
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<ts>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}[.,]\d{3}).*?\b(?P<level>TRACE|DEBUG|INFO|WARN|ERROR|FATAL)\b.*'
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          format: RFC3339Milli
+          # fallback nếu parse fail: dùng ts của Promtail
+          # location: UTC
+
+  # =========================
+  # 2) TOMCAT: catalina.out
+  # =========================
+  - job_name: tomcat-catalina
+    static_configs:
+      - targets: [ localhost ]
+        labels:
+          job: tomcat
+          component: tomcat
+          service_name: your-war-service
+          instance: ${HOSTNAME}
+          __path__: /opt/tomcat/logs/catalina.out
+    pipeline_stages:
+      - regex:
+          expression: '^(?P<ts>\w{3} \d{1,2}, \d{4} \d{2}:\d{2}:\d{2}).*?\b(?P<level>SEVERE|WARNING|INFO|FINE|FINER|FINEST|DEBUG|ERROR)\b.*'
+      - replace:
+          expression: 'SEVERE'
+          replace: 'ERROR'
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          # Tomcat catalina mặc định: "Oct 28, 2025 15:04:05"
+          format: 'Jan _2, 2006 15:04:05'
+
+  # =========================
+  # 3) TOMCAT: access logs
+  # =========================
+  - job_name: tomcat-access
+    static_configs:
+      - targets: [ localhost ]
+        labels:
+          job: tomcat-access
+          component: tomcat
+          service_name: your-war-service
+          instance: ${HOSTNAME}
+          __path__: /opt/tomcat/logs/localhost_access_log.*.txt
+    pipeline_stages:
+      - regex:
+          # 127.0.0.1 - - [28/Oct/2025:15:04:05 +0700] "GET /path HTTP/1.1" 200 123
+          expression: '^\S+ \S+ \S+ \[(?P<ts>[^]]+)\] "(?P<method>[A-Z]+) (?P<uri>\S+) \S+" (?P<status>\d{3}) (?P<size>\d+)'
+      - labels:
+          method:
+          uri:
+          status:
+      - timestamp:
+          source: ts
+          format: '02/Jan/2006:15:04:05 -0700'
+
+  # =========================
+  # 4) RabbitMQ (file logs)
+  # =========================
+  - job_name: rabbitmq-logs
+    static_configs:
+      - targets: [ localhost ]
+        labels:
+          job: rabbit
+          component: rabbit
+          service_name: rabbitmq
+          instance: ${HOSTNAME}
+          __path__: /var/log/rabbitmq/*.log
+    pipeline_stages:
+      - regex:
+          # =ERROR REPORT==== 28-Oct-2025::15:04:05 === …
+          expression: '^(?P<prefix>=(?P<level>DEBUG|INFO|WARNING|ERROR) REPORT==== )?(?P<ts>\d{1,2}-\w{3}-\d{4}::\d{2}:\d{2}:\d{2}).*'
+      - labels:
+          level:
+      - timestamp:
+          source: ts
+          # 28-Oct-2025::15:04:05
+          format: '02-Jan-2006::15:04:05'
+
+  # ======================================================
+  # 5) Memcached + RabbitMQ qua systemd journal (fallback)
+  #    Dùng khi memcached không ghi file riêng (chỉ journald)
+  # ======================================================
+  - job_name: systemd-units
+    journal:
+      json: false
+      max_age: 12h
+      path: /var/log/journal
+      labels:
+        job: journal
+        instance: ${HOSTNAME}
+    relabel_configs:
+      - source_labels: ['__journal__systemd_unit']
+        target_label: systemd_unit
+      - source_labels: ['__journal__hostname']
+        target_label: journal_host
+      # Map unit -> component + service_name
+      - source_labels: ['__journal__systemd_unit']
+        regex: 'memcached\.service'
+        target_label: component
+        replacement: 'mem'
+      - source_labels: ['__journal__systemd_unit']
+        regex: 'memcached\.service'
+        target_label: service_name
+        replacement: 'memcached'
+      - source_labels: ['__journal__systemd_unit']
+        regex: 'rabbitmq-server\.service'
+        target_label: component
+        replacement: 'rabbit'
+      - source_labels: ['__journal__systemd_unit']
+        regex: 'rabbitmq-server\.service'
+        target_label: service_name
+        replacement: 'rabbitmq'
+    pipeline_stages:
+      - regex:
+          expression: '.*?\b(?P<level>DEBUG|INFO|NOTICE|WARN|WARNING|ERR|ERROR|CRIT|ALERT|EMERG)\b.*'
+      - replace:
+          expression: 'NOTICE'
+          replace: 'INFO'
+      - labels:
+          level:
