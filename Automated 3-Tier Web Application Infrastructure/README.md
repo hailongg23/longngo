@@ -1,4 +1,4 @@
-<img width="1561" height="1323" alt="image" src="https://github.com/user-attachments/assets/4f4bbd59-1b25-48c2-a5ab-77ae963967f2" />
+<img width="1300" height="1100" alt="image" src="https://github.com/user-attachments/assets/4f4bbd59-1b25-48c2-a5ab-77ae963967f2" />
 
 ```mermaid
 flowchart LR
