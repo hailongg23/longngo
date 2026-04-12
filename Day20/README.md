@@ -90,21 +90,3 @@ flowchart LR
   G1 -->|"datasource: Loki"| L1
   G1 -->|"datasource: Tempo"| T1
 ```
-
-# Test
-```
-# Tomcat log phải thấy agent
-grep -i opentelemetry /opt/tomcat/logs/catalina.out
-
-# Collector mở 4317/4318/9464
-ss -lntp | grep -E '4317|4318|9464'
-
-# Agent có báo send OK chưa?
-grep -i "export metrics" /opt/tomcat/logs/catalina.out | tail
-
-# Collector có ghi nhận metric push vào?
-curl -s http://COLLECTOR_IP:9464/metrics | grep -E 'otel|your-war-service' | head
-
-# Prometheus Target “UP”
-# → Mở Grafana, query label {service_name="your-war-service"}
-```
