@@ -92,4 +92,5 @@ flowchart LR
   G1 -->|"datasource: Loki"| L1
   G1 -->|"datasource: Tempo"| T1
 ```
+<img width="2252" height="1301" alt="image" src="https://github.com/user-attachments/assets/bce0f51c-b7ab-4504-a53c-fe7b2c784605" />
 
